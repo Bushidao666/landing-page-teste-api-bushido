@@ -1,0 +1,17 @@
+{
+  "name": "meu-nome-ok-landing",
+  "version": "1.0.0",
+  "description": "Landing page para renegociação de dívidas consignadas",
+  "main": "index.html",
+  "scripts": {
+    "dev": "npx http-server . -p 3000 -o",
+    "start": "npx http-server . -p 3000 -o",
+    "build": "echo 'Build complete - projeto estático'"
+  },
+  "keywords": ["landing-page", "consignado", "dividas"],
+  "author": "Meu Nome Ok",
+  "license": "MIT",
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+}
