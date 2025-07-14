@@ -2,27 +2,60 @@
 
 Este documento fornece exemplos práticos de implementação para os 8 eventos personalizados do cliente "Meu Nome".
 
-## 📋 Eventos Implementados
+## 📋 Tabela de Eventos
 
-| # | Evento | Endpoint | event_name | Descrição |
-|---|--------|----------|------------|-----------|
-| 1 | Preencheu Formulário | `/api/track/custom/preencheu-formulario` | `PreencheuFormulario` | Lead preencheu formulário inicial |
-| 2 | Chamou no WhatsApp | `/api/track/custom/chamou-whatsapp` | `ChamouWhatsApp` | Lead clicou para falar no WhatsApp |
-| 3 | Vácuo | `/api/track/custom/vacuo` | `Vacuo` | Lead entrou em status de vácuo |
-| 4 | Lead Qualificado | `/api/track/custom/lead-qualificado` | `LeadQualificado` | Lead foi qualificado pela equipe |
-| 5 | Lead Recuperado | `/api/track/custom/lead-recuperado` | `LeadRecuperado` | Lead foi recuperado do vácuo |
-| 6 | Contrato Enviado | `/api/track/custom/contrato-enviado` | `ContratoEnviado` | Contrato foi enviado ao lead |
-| 7 | Contrato Assinado | `/api/track/custom/contrato-assinado` | `ContratoAssinado` | Lead assinou o contrato |
-| 8 | Pagou Primeira Cobrança | `/api/track/custom/pagou-primeira-cobranca` | `PagouPrimeiraCobranca` | Cliente pagou primeira cobrança |
+| # | Evento               | Endpoint (env)                | event_name           | Disparo                                        |
+|---|----------------------|-------------------------------|----------------------|------------------------------------------------|
+| 1 | Preencheu Formulário | `${SUPABASE_FORM_ENDPOINT}`   | `PreencheuFormulario`  | Ao submeter o formulário de lead               |
+| 2 | PageView             | `${CONVERSIONS_API_ENDPOINT}` | `PageView`             | Ao carregar a landing page                     |
+| 3 | ViewContent          | `${CONVERSIONS_API_ENDPOINT}` | `ViewContent`          | Quando o usuário visualizar a seção `#lp-section-before-form` |
+| 4 | Lead (FormSubmit)    | `${CONVERSIONS_API_ENDPOINT}` | `Lead`                 | Disparado junto com `PreencheuFormulario`      |
+| 5 | Chamou no WhatsApp   | `${CONVERSIONS_API_ENDPOINT}` | `ChamouWhatsApp`       | Clique no botão de contato do WhatsApp         |
+| 6 | Contrato Enviado     | `${CONVERSIONS_API_ENDPOINT}` | `ContratoEnviado`      | Ação interna (CRM/Backend)                     |
+| 7 | Contrato Assinado    | `${CONVERSIONS_API_ENDPOINT}` | `ContratoAssinado`     | Ação interna (CRM/Backend)                     |
+| 8 | Pagou Primeira Cobrança | `${CONVERSIONS_API_ENDPOINT}`| `PagouPrimeiraCobranca`| Ação interna (Webhook de Pagamento)            |
 
-## 🎯 Configuração no Facebook
+### Como configurar variáveis de ambiente
 
-Para cada evento funcionar corretamente no Facebook, configure as **Regras de Eventos** no Gerenciador de Eventos:
+Crie (ou atualize) um arquivo `js/config.js` na raiz do seu projeto para desenvolvimento local, ou configure as variáveis de ambiente diretamente no seu provedor de hospedagem (Netlify, Vercel, etc.).
 
-- **Tipo de Regra:** Event Parameters
-- **Parâmetro:** `event_name`
-- **Operador:** `contém`
-- **Valor:** Usar o `event_name` específico de cada evento
+**Exemplo para `js/config.js` (desenvolvimento):**
+```javascript
+// js/config.js
+window.ENV = {
+  SUPABASE_FORM_ENDPOINT: "https://xyz.supabase.co/functions/v1/track-form",
+  CONVERSIONS_API_ENDPOINT: "https://graph.facebook.com/v19.0/ID_DO_PIXEL/events?access_token=SEU_TOKEN"
+};
+```
+
+**Exemplo para `.env.local` (se usar um framework como Next.js):**
+```bash
+NEXT_PUBLIC_SUPABASE_FORM_ENDPOINT="https://xyz.supabase.co/functions/v1/track-form"
+NEXT_PUBLIC_CONVERSIONS_API_ENDPOINT="https://graph.facebook.com/v19.0/ID_DO_PIXEL/events?access_token=SEU_TOKEN"
+```
+
+---
+
+## ✅ Checklist para N8n / Fluxo DevOps
+
+| Passo | O que fazer                                       | Observação                                                                      |
+|-------|---------------------------------------------------|---------------------------------------------------------------------------------|
+| 1     | Comitar os dois `.md` atualizados                 | Eles viram referência para a IA                                                 |
+| 2     | Criar `.env.example` com as duas variáveis        | Evita esquecimento em novos ambientes                                           |
+| 3     | Ajustar o último nó do seu fluxo **N8n** para chamar o webhook do Supabase | O importante é que o payload enviado seja consistente com o esperado pela função. |
+| 4     | Testar no **Facebook Test Events**                | Ver _PageView_, _ViewContent_ (apenas 1), _Lead_ chegando                       |
+| 5     | Testar o webhook do Supabase via `curl`           | Confirma CORS e autenticação                                                    |
+
+---
+
+## 💡 Dicas Extras (Evita Dor de Cabeça)
+
+*   **Consolide o logger** – use `console.debug` dentro de cada função de evento para facilitar o QA.
+*   **De-duplication** – gere um `eventId` único (você já faz) e envie-o no payload; o Facebook ignora eventos duplicados com o mesmo ID.
+*   **Timeouts** – adote um `timeout: 4000` (4 segundos) no `fetch` para evitar que a requisição bloqueie a navegação em conexões lentas.
+*   **LGPD** – para eventos como `PageView` e `ViewContent`, onde você pode não ter o consentimento explícito para PII, evite enviar dados de usuário não hasheados. O hashing deve ser feito preferencialmente no backend.
+
+---
 
 ## 💻 Exemplos de Implementação Frontend
 
@@ -30,7 +63,7 @@ Para cada evento funcionar corretamente no Facebook, configure as **Regras de Ev
 
 ```html
 <script>
-// API Base URL - ajuste conforme necessário
+// API Base URL - agora controlada por variável de ambiente em js/config.js
 const API_BASE_URL = ''; // Vazio se no mesmo domínio
 
 // Função para gerar UUID

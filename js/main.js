@@ -1,17 +1,14 @@
-// Configura��o
-const AIRTABLE_API_KEY = 'patdE3uO6gqHW2DwI.4b453abb475df06454fd19ecd320fcec230c29a6aee64bb3f069cc515ebed848';
-const AIRTABLE_BASE_ID = 'appViUjy5hxH9RqCv';
-const AIRTABLE_TABLE_ID = 'tbl4MQGVdHO4vWRBp';
-const WEBHOOK_URL = 'https://primary-production-d53a.up.railway.app/webhook/validadorpages';
+// Configuração
+// As configurações foram movidas para js/config.js
 
-// Estado da aplica��o
+// Estado da aplicação
 let hasSubmitted = localStorage.getItem('hasSubmitted') === 'true';
 let phoneValidated = false;
 
-// Fun��es do popup
+// Funções do popup
 function openPopup() {
     if (hasSubmitted) {
-        alert('J� recebemos seus dados, nossa atendente Vera L�cia Nogueira ir� brevemente entrar em contato com voc� via WhatsApp. Fique atento!');
+        alert('Já recebemos seus dados, nossa atendente Vera Lícia Nogueira irá brevemente entrar em contato com você via WhatsApp. Fique atento!');
         return;
     }
     document.getElementById('popup-overlay').classList.add('active');
@@ -25,7 +22,7 @@ function closeExitPopup() {
     document.getElementById('exit-popup').classList.remove('active');
 }
 
-// M�scara de telefone
+// Máscara de telefone
 function phoneMask(value) {
     value = value.replace(/\D/g, '');
     value = value.replace(/^(\d{2})(\d)/g, '$1 $2');
@@ -33,7 +30,7 @@ function phoneMask(value) {
     return value;
 }
 
-// Valida��o de WhatsApp via webhook
+// Validação de WhatsApp via webhook
 async function validateWhatsApp(phone) {
     const cleanPhone = phone.replace(/\D/g, '');
     
@@ -42,7 +39,7 @@ async function validateWhatsApp(phone) {
     }
     
     try {
-        const response = await fetch(WEBHOOK_URL, {
+        const response = await fetch(ENV.WHATSAPP_VALIDATOR_WEBHOOK_URL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -58,7 +55,7 @@ async function validateWhatsApp(phone) {
     }
 }
 
-// Captura par�metros UTM
+// Captura parâmetros UTM
 function getUTMParams() {
     const params = new URLSearchParams(window.location.search);
     return {
@@ -88,10 +85,10 @@ async function sendToAirtable(formData) {
     };
     
     try {
-        const response = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_ID}`, {
+        const response = await fetch(`https://api.airtable.com/v0/${ENV.AIRTABLE_BASE_ID}/${ENV.AIRTABLE_TABLE_ID}`, {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${AIRTABLE_API_KEY}`,
+                'Authorization': `Bearer ${ENV.AIRTABLE_API_KEY}`,
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify(airtableData)
@@ -115,7 +112,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const submitButton = document.getElementById('submit-button');
     const leadForm = document.getElementById('lead-form');
     
-    // Aplicar m�scara ao telefone
+    // Aplicar máscara ao telefone
     phoneInput.addEventListener('input', async function(e) {
         e.target.value = phoneMask(e.target.value);
         
@@ -132,7 +129,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 submitButton.disabled = false;
                 phoneValidated = true;
             } else {
-                phoneError.textContent = 'WhatsApp inv�lido';
+                phoneError.textContent = 'WhatsApp inválido';
                 phoneError.style.color = '#e74c3c';
                 submitButton.disabled = true;
                 phoneValidated = false;
@@ -144,12 +141,12 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Submiss�o do formul�rio
+    // Submissão do formulário
     leadForm.addEventListener('submit', async function(e) {
         e.preventDefault();
         
         if (!phoneValidated) {
-            alert('Por favor, insira um WhatsApp v�lido.');
+            alert('Por favor, insira um WhatsApp válido.');
             return;
         }
         
@@ -174,12 +171,12 @@ document.addEventListener('DOMContentLoaded', function() {
             localStorage.setItem('hasSubmitted', 'true');
             hasSubmitted = true;
             
-            // Redirecionar para p�gina de obrigado
+            // Redirecionar para página de obrigado
             window.location.href = '/obrigado';
         } catch (error) {
             alert('Erro ao enviar seus dados. Por favor, tente novamente.');
             submitButton.disabled = false;
-            submitButton.textContent = 'Solicitar An�lise';
+            submitButton.textContent = 'Solicitar Análise';
         }
     });
     

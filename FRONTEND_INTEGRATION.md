@@ -5,17 +5,19 @@ Este documento fornece exemplos práticos e completos de como integrar qualquer 
 ## Índice
 
 1. [Visão Geral](#visão-geral)
-2. [Scripts Base Necessários](#scripts-base-necessários)
-3. [Configuração Inicial](#configuração-inicial)
-4. [Implementação do Evento PageView](#implementação-do-evento-pageview)
-5. [Implementação do Evento ViewContent](#implementação-do-evento-viewcontent)
-6. [Implementação do Evento InitiateCheckout](#implementação-do-evento-initiatecheckout)
-7. [Implementação do Evento Lead](#implementação-do-evento-lead)
-8. [Captura de Dados do Usuário (Lead Form)](#captura-de-dados-do-usuário-lead-form)
-9. [Script Completo de Exemplo](#script-completo-de-exemplo)
-10. [Integração com Facebook Pixel](#integração-com-facebook-pixel)
-11. [Debugging e Monitoramento](#debugging-e-monitoramento)
-12. [Considerações de Performance](#considerações-de-performance)
+2. [🛠️ Environment Variables](#️-environment-variables)
+3. [Scripts Base Necessários](#scripts-base-necessários)
+4. [Configuração Inicial](#configuração-inicial)
+5. [Implementação do Evento PageView](#implementação-do-evento-pageview)
+6. [Implementação do Evento ViewContent](#implementação-do-evento-viewcontent)
+7. [Implementação do Evento InitiateCheckout](#implementação-do-evento-initiatecheckout)
+8. [Implementação do Evento Lead](#implementação-do-evento-lead)
+9. [Captura de Dados do Usuário (Lead Form)](#captura-de-dados-do-usuário-lead-form)
+10. [EVENTO: PREENCHER FORMULÁRIO (Supabase)](#evento-preencher-formulário--supabase)
+11. [Script Completo de Exemplo](#script-completo-de-exemplo)
+12. [Integração com Facebook Pixel](#integração-com-facebook-pixel)
+13. [Debugging e Monitoramento](#debugging-e-monitoramento)
+14. [Considerações de Performance](#considerações-de-performance)
 
 ## Visão Geral
 
@@ -37,9 +39,34 @@ Para garantir a máxima qualidade dos dados e seguir as melhores práticas da Me
     *   Garantir que o `fbclid` seja removido de todas as fontes antes que quaisquer outros `urlParameters` (como UTMs) sejam mesclados ao `customData` final.
     *   Isso assegura que `user_data.fbc` seja corretamente preenchido e que `fbclid` não contamine o objeto `custom_data` enviado ao Facebook, enquanto os UTMs são corretamente incluídos em `custom_data`.
 
+## 🛠️ Environment Variables
+
+| Nome                       | Usado para                                               | Exemplo                                                |
+| -------------------------- | -------------------------------------------------------- | ------------------------------------------------------ |
+| `SUPABASE_FORM_ENDPOINT`   | Webhook do Supabase que recebe o evento **Preencheu Formulário** | `https://xyz.supabase.co/functions/v1/track-form`      |
+| `CONVERSIONS_API_ENDPOINT` | Endpoint da API de Conversões (PageView, ViewContent, Lead)      | `https://graph.facebook.com/v19.0/123/events` |
+
 ## Scripts Base Necessários
 
-### 1. Utilitários Básicos
+### 1. Carregando Variáveis de Ambiente
+
+Para que o frontend possa acessar as variáveis de ambiente, crie um arquivo `js/config.js` que será carregado antes dos outros scripts. Em um ambiente de build (como Netlify/Vercel), essas variáveis podem ser injetadas dinamicamente. Para desenvolvimento local, você pode preenchê-las manualmente.
+
+```javascript
+// js/config.js
+window.ENV = {
+  SUPABASE_FORM_ENDPOINT: 'URL_DO_SEU_WEBHOOK_SUPABASE_AQUI',
+  CONVERSIONS_API_ENDPOINT: 'URL_DA_SUA_API_DE_CONVERSÕES_AQUI'
+};
+```
+Em um framework como Next.js, isso seria feito de forma diferente:
+```javascript
+// helpers/env.js
+export const SUPABASE_FORM_ENDPOINT   = process.env.NEXT_PUBLIC_SUPABASE_FORM_ENDPOINT;
+export const CONVERSIONS_API_ENDPOINT = process.env.NEXT_PUBLIC_CONVERSIONS_API_ENDPOINT;
+```
+
+### 2. Utilitários Básicos
 
 Adicione este script no `<head>` do seu HTML:
 
@@ -238,7 +265,7 @@ async function sendPageViewEvent() {
   try {
     debugLog('Enviando PageView (CAPI)', payload);
     
-    const response = await fetch(`${API_BASE_URL}/api/track/pageview`, {
+    const response = await fetch(window.ENV.CONVERSIONS_API_ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -311,7 +338,7 @@ async function sendViewContentEvent(productSpecificCustomData) {
   try {
     debugLog('Enviando ViewContent (CAPI)', payload);
     
-    const response = await fetch(`${API_BASE_URL}/api/track/viewcontent`, {
+    const response = await fetch(window.ENV.CONVERSIONS_API_ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -352,6 +379,20 @@ function trackProductView() {
   };
   
   sendViewContentEvent(productDataForCAPI);
+}
+
+// Dispara ViewContent quando o usuário visualizar a seção antes do formulário
+const sectionBeforeForm = document.querySelector('#lp-section-before-form');
+
+if (sectionBeforeForm) {
+  const io = new IntersectionObserver(([entry]) => {
+    if (entry.isIntersecting) {
+      sendViewContentEvent({ section: 'antes-do-form' });
+      io.disconnect();          // garante 1 único disparo
+    }
+  }, { threshold: 0.5 });       // 50 % visível
+
+  io.observe(sectionBeforeForm);
 }
 
 // Auto-track se estiver em uma página de produto
@@ -410,7 +451,7 @@ async function sendInitiateCheckoutEvent(checkoutSpecificCustomData) {
   try {
     debugLog('Enviando InitiateCheckout (CAPI)', payload);
     
-    const response = await fetch(`${API_BASE_URL}/api/track/initiatecheckout`, {
+    const response = await fetch(window.ENV.CONVERSIONS_API_ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -507,7 +548,7 @@ async function sendLeadEvent(leadData) {
   try {
     debugLog('Enviando Lead', payload);
     
-    const response = await fetch(`${API_BASE_URL}/api/track/lead`, {
+    const response = await fetch(window.ENV.CONVERSIONS_API_ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -666,6 +707,18 @@ function buildCheckoutUrl(formData, eventId) {
 }
 </script>
 ```
+
+## EVENTO: PREENCHER FORMULÁRIO (Supabase)
+// ==============================================
+async function sendPreencheuFormulario(formData) {
+  const payload = { ...formData, event: 'PreencheuFormulario', timestamp: Date.now() };
+
+  await fetch(window.ENV.SUPABASE_FORM_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+}
 
 ## Script Completo de Exemplo
 
@@ -827,7 +880,7 @@ async function sendDualEvent(eventName, pixelParams, capiPayload) {
   
   if (endpoint) {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/track/${endpoint}`, {
+      const response = await fetch(window.ENV.CONVERSIONS_API_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(capiPayload)
@@ -943,7 +996,7 @@ const FBConversionsDebug = {
   // Função para testar conectividade com a API
   testAPI: async function() {
     try {
-      const response = await fetch(`${API_BASE_URL}/`, {
+      const response = await fetch(window.ENV.CONVERSIONS_API_ENDPOINT, {
         method: 'GET'
       });
       

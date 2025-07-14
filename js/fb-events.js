@@ -6,8 +6,7 @@
 // ===================================================================
 
 // --- CONFIGURAÇÃO PRINCIPAL ---
-// ⚠️ SUBSTITUA PELOS SEUS DADOS REAIS
-const API_BASE_URL = 'URL_DA_SUA_API_AQUI'; // Ex: 'https://sua-api.up.railway.app'
+// As configurações foram movidas para js/config.js
 const FACEBOOK_CONFIG = {
   currency: 'BRL',
   debugMode: true, // Mude para false em produção
@@ -110,8 +109,8 @@ function updateUserData(newData) {
 
 // Função genérica para enviar eventos para a API de Conversões
 async function sendFbEvent(eventType, eventName, customData = {}, eventSourceUrl) {
-  if (!API_BASE_URL || API_BASE_URL === 'URL_DA_SUA_API_AQUI') {
-    console.error('URL da API de Conversões do Facebook (API_BASE_URL) não configurada em js/fb-events.js');
+  if (!ENV.FACEBOOK_CAPI_URL || ENV.FACEBOOK_CAPI_URL === 'URL_DA_SUA_API_AQUI') {
+    console.error('URL da API de Conversões do Facebook (FACEBOOK_CAPI_URL) não configurada em js/config.js');
     return;
   }
   
@@ -160,7 +159,7 @@ async function sendFbEvent(eventType, eventName, customData = {}, eventSourceUrl
       fbq('track', eventName, customData, { eventID: eventId });
     }
     
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const response = await fetch(`${ENV.FACEBOOK_CAPI_URL}${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
