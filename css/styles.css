@@ -562,6 +562,38 @@ footer {
     font-size: 12px;
     margin-top: 5px;
     color: #e74c3c;
+    transition: all 0.3s ease;
+    font-weight: 500;
+}
+
+.error-message.validating {
+    color: #3498db;
+}
+
+.error-message.validating::before {
+    content: "🔄 ";
+    animation: spin 1s linear infinite;
+}
+
+.error-message.valid {
+    color: #27ae60;
+}
+
+.error-message.invalid {
+    color: #e74c3c;
+}
+
+.error-message.error {
+    color: #f39c12;
+}
+
+.error-message.info {
+    color: #95a5a6;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
 }
 
 .lgpd-notice {

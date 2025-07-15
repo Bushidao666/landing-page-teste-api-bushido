@@ -1,17 +1,25 @@
 // ===================================================================
 //
-//  FACEBOOK CONVERSIONS API & CUSTOM EVENTS INTEGRATION SCRIPT
-//  Baseado nas documentações: FRONTEND_INTEGRATION.md e EVENTOS_PERSONALIZADOS_GUIA.md
+//  FACEBOOK CONVERSIONS API & PIXEL INTEGRATION WITH DEDUPLICATION
+//  
+// ===================================================================
+//
+// Sistema completo de eventos Facebook com:
+// - Deduplicação Pixel + CAPI 
+// - Envio para API de Conversões Railway
+// - Gerenciamento de dados de usuário
+// - Cache de eventos e otimizações
 //
 // ===================================================================
 
-// --- CONFIGURAÇÃO PRINCIPAL ---
-// As configurações foram movidas para js/config.js
+/**
+ * CONFIGURAÇÃO PRINCIPAL
+ */
 const FACEBOOK_CONFIG = {
   currency: 'BRL',
-  debugMode: true, // Mude para false em produção
+  debugMode: true, // Altere para false em produção
+  pixelId: '1226168308717459'
 };
-// ---------------------------------
 
 /**
  * UTILITY FUNCTIONS
@@ -57,12 +65,31 @@ function getExternalId() {
   return externalId;
 }
 
-// Objeto para log de debug
-function debugLog(message, data) {
-    if (FACEBOOK_CONFIG.debugMode) {
-      console.log(`[FB CAPI] ${message}`, data);
+// Sistema de debug avançado
+const FBDebug = {
+  log: function(level, message, data) {
+    if (!FACEBOOK_CONFIG.debugMode) return;
+    
+    const timestamp = new Date().toISOString();
+    const prefix = `[FB ${level.toUpperCase()}] ${timestamp}`;
+    
+    switch(level) {
+      case 'info':
+        console.log(prefix, message, data || '');
+        break;
+      case 'warn':
+        console.warn(prefix, message, data || '');
+        break;
+      case 'error':
+        console.error(prefix, message, data || '');
+        break;
     }
-}
+  },
+  
+  info: function(message, data) { this.log('info', message, data); },
+  warn: function(message, data) { this.log('warn', message, data); },
+  error: function(message, data) { this.log('error', message, data); }
+};
 
 /**
  * GERENCIAMENTO DE DADOS DO USUÁRIO
@@ -73,10 +100,10 @@ let globalUserData = {
   external_id: getExternalId(),
   fbp: getCookie('_fbp'),
   fbc: getCookie('_fbc') || (getUrlParameters().fbclid || undefined),
-  em: undefined,
-  ph: undefined,
-  fn: undefined,
-  ln: undefined
+  em: undefined, // Email bruto (será hasheado pelo backend)
+  ph: undefined, // Telefone bruto (será hasheado pelo backend)  
+  fn: undefined, // Nome bruto (será hasheado pelo backend)
+  ln: undefined  // Sobrenome bruto (será hasheado pelo backend)
 };
 
 // Função para carregar dados do usuário do localStorage
@@ -84,11 +111,22 @@ function loadUserData() {
   try {
     const storedData = localStorage.getItem('fb_user_data');
     if (storedData) {
-      Object.assign(globalUserData, JSON.parse(storedData));
+      const parsed = JSON.parse(storedData);
+      Object.assign(globalUserData, parsed);
+      
+      // Atualizar cookies do Facebook se disponíveis
+      globalUserData.fbp = getCookie('_fbp') || globalUserData.fbp;
+      globalUserData.fbc = getCookie('_fbc') || globalUserData.fbc;
+      
+      // Verificar fbclid na URL atual
+      const currentFbclid = getUrlParameters().fbclid;
+      if (currentFbclid) {
+        globalUserData.fbc = currentFbclid;
+      }
     }
-    debugLog('Dados do usuário carregados', globalUserData);
+    FBDebug.info('Dados do usuário carregados', globalUserData);
   } catch (error) {
-    console.error('Erro ao carregar dados do usuário do localStorage:', error);
+    FBDebug.error('Erro ao carregar dados do localStorage', error);
   }
 }
 
@@ -97,36 +135,59 @@ function updateUserData(newData) {
   Object.assign(globalUserData, newData);
   try {
     localStorage.setItem('fb_user_data', JSON.stringify(globalUserData));
-    debugLog('Dados do usuário atualizados e salvos', globalUserData);
+    FBDebug.info('Dados do usuário atualizados', globalUserData);
   } catch (error) {
-    console.error('Erro ao salvar dados do usuário no localStorage:', error);
+    FBDebug.error('Erro ao salvar dados no localStorage', error);
   }
 }
 
 /**
- * FUNÇÃO PRINCIPAL DE ENVIO DE EVENTOS
+ * SISTEMA DE CACHE DE EVENTOS
+ */
+const EventCache = {
+  sentEvents: new Set(),
+  
+  shouldSendEvent: function(eventType, identifier) {
+    const key = `${eventType}_${identifier || 'default'}`;
+    if (this.sentEvents.has(key)) {
+      FBDebug.warn('Evento duplicado bloqueado', { eventType, identifier });
+      return false;
+    }
+    this.sentEvents.add(key);
+    return true;
+  },
+  
+  markEventSent: function(eventType, identifier) {
+    const key = `${eventType}_${identifier || 'default'}`;
+    this.sentEvents.add(key);
+  }
+};
+
+/**
+ * FUNÇÃO PRINCIPAL DE ENVIO PARA CONVERSIONS API
  */
 
-// Função genérica para enviar eventos para a API de Conversões
-async function sendFbEvent(eventType, eventName, customData = {}, eventSourceUrl) {
-  if (!ENV.FACEBOOK_CAPI_URL || ENV.FACEBOOK_CAPI_URL === 'URL_DA_SUA_API_AQUI') {
-    console.error('URL da API de Conversões do Facebook (FACEBOOK_CAPI_URL) não configurada em js/config.js');
-    return;
+async function sendToConversionsAPI(eventName, eventData, eventId) {
+  if (!window.ENV?.API_BASE_URL) {
+    FBDebug.error('API_BASE_URL não configurada');
+    return { success: false, error: 'Configuração ausente' };
   }
   
-  const eventId = generateUUID();
   const urlParameters = getUrlParameters();
   
-  // O endpoint varia se o evento é padrão ou customizado
-  const endpoint = eventType === 'standard' 
-    ? `/api/track/${eventName.toLowerCase()}` 
-    : `/api/track/custom/${eventName.toLowerCase()}`;
+  // Determinar endpoint baseado no tipo de evento
+  const isCustomEvent = !['PageView', 'ViewContent', 'Lead', 'InitiateCheckout'].includes(eventName);
+  const endpoint = isCustomEvent 
+    ? `/api/track/custom/${eventName.toLowerCase()}` 
+    : `/api/track/${eventName.toLowerCase()}`;
     
-  // Adiciona o event_name para eventos customizados
-  if (eventType === 'custom') {
+  // Preparar dados customizados
+  const customData = { ...eventData };
+  if (isCustomEvent) {
     customData.event_name = eventName;
   }
-
+  
+  // Construir payload para CAPI
   const payload = {
     eventId: eventId,
     userData: {
@@ -139,57 +200,137 @@ async function sendFbEvent(eventType, eventName, customData = {}, eventSourceUrl
       fbp: globalUserData.fbp || undefined,
     },
     customData: customData,
-    eventSourceUrl: eventSourceUrl || window.location.href,
+    eventSourceUrl: window.location.href,
     urlParameters: urlParameters,
     actionSource: 'website'
   };
-
-  // Limpa campos de userData que não foram preenchidos
-  for (const key in payload.userData) {
+  
+  // Limpar campos undefined
+  Object.keys(payload.userData).forEach(key => {
     if (payload.userData[key] === undefined || payload.userData[key] === null) {
       delete payload.userData[key];
     }
-  }
-
+  });
+  
   try {
-    debugLog(`Enviando evento: ${eventName}`, payload);
+    FBDebug.info(`Enviando para CAPI: ${eventName}`, payload);
     
-    // Envia o evento para o Pixel do Facebook (se existir) para deduplicação
-    if (typeof fbq !== 'undefined') {
-      fbq('track', eventName, customData, { eventID: eventId });
+    const response = await fetch(`${window.ENV.API_BASE_URL}${endpoint}`, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(payload),
+      timeout: 10000 // 10 segundos timeout
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Erro desconhecido');
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
     
-    const response = await fetch(`${ENV.FACEBOOK_CAPI_URL}${endpoint}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-
     const result = await response.json();
     
-    if (response.ok && result.success) {
-      debugLog(`✅ Evento ${eventName} enviado com sucesso`, { eventId, fbtrace_id: result.fbtrace_id, diagnostics: result.diagnostics });
-    } else {
-      console.error(`❌ Erro no evento ${eventName}:`, result.error || result);
-    }
+    FBDebug.info(`✅ CAPI ${eventName} enviado com sucesso`, { 
+      eventId, 
+      fbtrace_id: result.fbtrace_id,
+      diagnostics: result.diagnostics 
+    });
+    
+    return { success: true, result };
+    
   } catch (error) {
-    console.error(`❌ Erro de rede ao enviar evento ${eventName}:`, error);
+    FBDebug.error(`❌ Erro no CAPI ${eventName}`, error);
+    return { success: false, error: error.message };
   }
 }
 
+/**
+ * FUNÇÃO DE ENVIO DUAL (PIXEL + CAPI) COM DEDUPLICAÇÃO
+ */
+
+async function sendDualEvent(eventName, pixelData = {}, capiData = {}) {
+  const eventId = generateUUID();
+  
+  // 1. Enviar para Facebook Pixel (client-side) se disponível
+  if (typeof fbq !== 'undefined') {
+    try {
+      fbq('track', eventName, pixelData, { eventID: eventId });
+      FBDebug.info(`✅ Pixel ${eventName} enviado`, { eventId, pixelData });
+    } catch (error) {
+      FBDebug.error(`❌ Erro no Pixel ${eventName}`, error);
+    }
+  } else {
+    FBDebug.warn('Facebook Pixel não disponível');
+  }
+  
+  // 2. Enviar para Conversions API (server-side)
+  const capiResult = await sendToConversionsAPI(eventName, capiData, eventId);
+  
+  return {
+    eventId,
+    pixel: typeof fbq !== 'undefined',
+    capi: capiResult.success,
+    error: capiResult.error
+  };
+}
 
 /**
- * FUNÇÕES DE RASTREAMENTO DE EVENTOS
+ * EVENTOS ESPECÍFICOS
  */
 
 // 1. PageView (Evento Padrão)
-function trackPageView() {
-  sendFbEvent('standard', 'PageView', {}, window.location.href);
+async function trackPageView() {
+  const pageIdentifier = window.location.pathname;
+  
+  if (!EventCache.shouldSendEvent('PageView', pageIdentifier)) {
+    return;
+  }
+  
+  const pixelData = {};
+  const capiData = {};
+  
+  const result = await sendDualEvent('PageView', pixelData, capiData);
+  FBDebug.info('PageView tracking completo', result);
+  
+  return result;
 }
 
-// 2. PreencheuFormulario (Evento Customizado)
-function trackPreencheuFormulario(formData = {}) {
-  // Atualiza os dados globais com as informações do formulário
+// 2. ViewContent (Seção de Depoimentos)
+async function trackViewContent(customData = {}) {
+  const sectionIdentifier = 'video-testimonials';
+  
+  if (!EventCache.shouldSendEvent('ViewContent', sectionIdentifier)) {
+    return;
+  }
+  
+  const defaultData = {
+    content_name: 'Depoimentos em Vídeo',
+    content_category: 'social_proof',
+    content_type: 'video_testimonials',
+    value: 0,
+    currency: FACEBOOK_CONFIG.currency
+  };
+  
+  const pixelData = { ...defaultData, ...customData };
+  const capiData = { ...defaultData, ...customData };
+  
+  const result = await sendDualEvent('ViewContent', pixelData, capiData);
+  FBDebug.info('ViewContent tracking completo', result);
+  
+  return result;
+}
+
+// 3. Lead (Submissão do Formulário)
+async function trackLead(formData = {}) {
+  const leadId = `${Date.now()}_${globalUserData.external_id}`;
+  
+  if (!EventCache.shouldSendEvent('Lead', leadId)) {
+    return;
+  }
+  
+  // Atualizar dados do usuário com informações do formulário
   if (formData.email) updateUserData({ em: formData.email.trim().toLowerCase() });
   if (formData.phone) updateUserData({ ph: formData.phone.replace(/\D/g, '') });
   if (formData.name) {
@@ -198,28 +339,175 @@ function trackPreencheuFormulario(formData = {}) {
     const lastName = nameParts.join(' ');
     updateUserData({ fn: firstName, ln: lastName });
   }
-
-  const customData = {
+  
+  const leadEventData = {
     content_name: 'Formulário de Análise Gratuita',
+    content_category: 'lead_generation',
     form_type: 'landing_page_lead',
     source_page: window.location.pathname,
-    // Adicionar valor e moeda se aplicável, ex:
-    // value: 0.0,
-    // currency: FACEBOOK_CONFIG.currency,
+    value: 0,
+    currency: FACEBOOK_CONFIG.currency,
+    content_type: 'lead',
+    contents: [{
+      id: 'lead_form',
+      quantity: 1,
+      item_price: 0
+    }],
+    num_items: 1
   };
-
-  sendFbEvent('custom', 'PreencheuFormulario', customData);
+  
+  const result = await sendDualEvent('Lead', leadEventData, leadEventData);
+  FBDebug.info('Lead tracking completo', result);
+  
+  return result;
 }
 
+// 4. Evento para Supabase (Preencheu Formulário)
+async function sendToSupabase(formData) {
+  if (!window.ENV?.SUPABASE_FORM_ENDPOINT || window.ENV.SUPABASE_FORM_ENDPOINT === 'CONFIGURE_NO_NETLIFY') {
+    FBDebug.warn('Endpoint Supabase não configurado');
+    return { success: false, error: 'Endpoint não configurado' };
+  }
+  
+  const payload = {
+    ...formData,
+    event: 'PreencheuFormulario',
+    timestamp: Date.now(),
+    external_id: globalUserData.external_id,
+    url: window.location.href,
+    utm_params: getUrlParameters()
+  };
+  
+  try {
+    FBDebug.info('Enviando para Supabase', payload);
+    
+    const response = await fetch(window.ENV.SUPABASE_FORM_ENDPOINT, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(payload),
+      timeout: 8000 // 8 segundos timeout
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    const result = await response.json();
+    FBDebug.info('✅ Evento Supabase enviado com sucesso', result);
+    
+    return { success: true, result };
+    
+  } catch (error) {
+    FBDebug.error('❌ Erro no evento Supabase', error);
+    return { success: false, error: error.message };
+  }
+}
 
 /**
- * INICIALIZAÇÃO
+ * INTERSECTION OBSERVER PARA VIEWCONTENT
  */
+
+function setupViewContentObserver() {
+  const targetSection = document.querySelector('.video-testimonials');
+  
+  if (!targetSection) {
+    FBDebug.warn('Seção .video-testimonials não encontrada');
+    return;
+  }
+  
+  const observer = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          FBDebug.info('Seção de depoimentos visualizada');
+          trackViewContent();
+          observer.disconnect(); // Disparar apenas uma vez
+        }
+      });
+    },
+    { 
+      threshold: 0.5, // 50% da seção visível
+      rootMargin: '0px 0px -100px 0px' // Margem para garantir visualização efetiva
+    }
+  );
+  
+  observer.observe(targetSection);
+  FBDebug.info('Observer ViewContent configurado');
+}
+
+/**
+ * VALIDAÇÃO E INICIALIZAÇÃO
+ */
+
+function validateFacebookConfig() {
+  const issues = [];
+  
+  if (!globalUserData.external_id) {
+    issues.push('external_id não foi gerado');
+  }
+  
+  if (!globalUserData.fbp && !globalUserData.fbc) {
+    issues.push('Nenhum identificador do Facebook encontrado (fbp/fbc)');
+  }
+  
+  if (!window.ENV?.API_BASE_URL) {
+    issues.push('API_BASE_URL não configurada');
+  }
+  
+  if (issues.length > 0) {
+    FBDebug.warn('Problemas de configuração encontrados', issues);
+  } else {
+    FBDebug.info('Configuração validada com sucesso');
+  }
+  
+  return issues.length === 0;
+}
+
+/**
+ * INICIALIZAÇÃO AUTOMÁTICA
+ */
+
 document.addEventListener('DOMContentLoaded', function() {
+  FBDebug.info('Inicializando sistema Facebook Events');
+  
+  // Carregar dados do usuário
   loadUserData();
-  // Dispara o PageView para cada página carregada
-  // Adiciona um pequeno delay para garantir que o fbc/fbp do cookie do pixel seja lido
+  
+  // Validar configuração
+  validateFacebookConfig();
+  
+  // Configurar observer para ViewContent
+  setupViewContentObserver();
+  
+  FBDebug.info('Sistema Facebook Events inicializado com sucesso');
+});
+
+// PageView automático após carregamento completo
+window.addEventListener('load', function() {
+  // Delay para garantir que cookies do Pixel sejam carregados
   setTimeout(() => {
+    // Atualizar cookies do Facebook mais recentes
+    globalUserData.fbp = getCookie('_fbp') || globalUserData.fbp;
+    globalUserData.fbc = getCookie('_fbc') || globalUserData.fbc;
+    
+    // Disparar PageView
     trackPageView();
-  }, 500);
-}); 
+  }, 1000);
+});
+
+// Exposer funções globais para uso externo
+window.fbEvents = {
+  trackPageView,
+  trackViewContent,
+  trackLead,
+  sendToSupabase,
+  updateUserData,
+  getUserData: () => ({ ...globalUserData }),
+  clearCache: () => EventCache.sentEvents.clear(),
+  debug: FBDebug
+};
+
+FBDebug.info('✅ Facebook Events carregado com deduplicação ativa'); 

@@ -1,17 +1,28 @@
 {
   "name": "meu-nome-ok-landing",
-  "version": "1.0.0",
-  "description": "Landing page para renegociação de dívidas consignadas",
+  "version": "2.0.0",
+  "description": "Landing page com Facebook Conversions API e Evolution WhatsApp validator",
   "main": "index.html",
   "scripts": {
     "dev": "npx http-server . -p 3000 -o",
     "start": "npx http-server . -p 3000 -o",
-    "build": "echo 'Build complete - projeto estático'"
+    "build": "node scripts/build-env.js && echo 'Build complete with environment variables'",
+    "build:dev": "node scripts/build-env.js",
+    "test:env": "node -e \"require('./scripts/build-env.js').generateConfigFile(); console.log('Environment test complete');\""
   },
-  "keywords": ["landing-page", "consignado", "dividas"],
+  "keywords": ["landing-page", "consignado", "dividas", "facebook-conversions-api", "evolution-api"],
   "author": "Meu Nome Ok",
   "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  },
   "devDependencies": {
     "http-server": "^14.1.1"
-  }
+  },
+  "dependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "landing-page-teste-api-bushido"
+  },
+  "private": true
 }

@@ -1,6 +1,6 @@
 [build]
   publish = "."
-  command = "echo 'Build complete'"
+  command = "node scripts/build-env.js && echo 'Build complete with environment variables processed'"
 
 [[redirects]]
   from = "/obrigado"

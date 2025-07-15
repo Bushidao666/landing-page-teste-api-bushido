@@ -30,28 +30,26 @@ function phoneMask(value) {
     return value;
 }
 
-// Validação de WhatsApp via webhook
+// Validação de WhatsApp via Evolution API (substituindo webhook legado)
 async function validateWhatsApp(phone) {
     const cleanPhone = phone.replace(/\D/g, '');
     
-    if (cleanPhone.length !== 11) {
-        return false;
+    if (cleanPhone.length < 10 || cleanPhone.length > 11) {
+        return { exists: false, error: 'Número deve ter 10 ou 11 dígitos' };
     }
     
     try {
-        const response = await fetch(ENV.WHATSAPP_VALIDATOR_WEBHOOK_URL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ phone: cleanPhone })
-        });
-        
-        const data = await response.json();
-        return data.exists === true;
+        // Usar o novo validador Evolution API
+        const result = await window.validateWhatsApp(phone);
+        return result;
     } catch (error) {
-        console.error('Erro ao validar WhatsApp:', error);
-        return false;
+        console.error('[Main] Erro ao validar WhatsApp:', error);
+        return { 
+            exists: false, 
+            error: 'Erro na validação', 
+            validated: false,
+            phone: phone
+        };
     }
 }
 
@@ -112,32 +110,79 @@ document.addEventListener('DOMContentLoaded', function() {
     const submitButton = document.getElementById('submit-button');
     const leadForm = document.getElementById('lead-form');
     
-    // Aplicar máscara ao telefone
+    console.log('[Main] Inicializando manipulação do formulário');
+    
+    // Aplicar máscara ao telefone com validação Evolution API
+    let validationTimeout;
+    
     phoneInput.addEventListener('input', async function(e) {
         e.target.value = phoneMask(e.target.value);
         
         const cleanPhone = e.target.value.replace(/\D/g, '');
         
-        if (cleanPhone.length === 11) {
+        // Limpar timeout anterior
+        if (validationTimeout) {
+            clearTimeout(validationTimeout);
+        }
+        
+        // Reset do estado de validação
+        phoneValidated = false;
+        submitButton.disabled = true;
+        
+        if (cleanPhone.length >= 10 && cleanPhone.length <= 11) {
             phoneError.textContent = 'Validando WhatsApp...';
-            phoneError.style.color = '#666';
+            phoneError.style.color = '#3498db';
+            phoneError.className = 'error-message validating';
             
-            const isValid = await validateWhatsApp(e.target.value);
+            // Debounce da validação (aguardar 800ms após parar de digitar)
+            validationTimeout = setTimeout(async () => {
+                try {
+                    const validationResult = await validateWhatsApp(e.target.value);
+                    
+                    if (validationResult.validated && validationResult.exists) {
+                        phoneError.textContent = '✓ WhatsApp válido';
+                        phoneError.style.color = '#27ae60';
+                        phoneError.className = 'error-message valid';
+                        submitButton.disabled = false;
+                        phoneValidated = true;
+                        
+                        // Disparar evento para Supabase após validação bem-sucedida
+                        const formData = {
+                            name: document.getElementById('name').value,
+                            phone: e.target.value,
+                            email: document.getElementById('email').value
+                        };
+                        
+                        if (formData.name && formData.email) {
+                            console.log('[Main] Enviando evento PreencheuFormulario para Supabase');
+                            window.fbEvents?.sendToSupabase(formData);
+                        }
+                        
+                    } else {
+                        const errorMsg = validationResult.error || 'WhatsApp não encontrado';
+                        phoneError.textContent = `✗ ${errorMsg}`;
+                        phoneError.style.color = '#e74c3c';
+                        phoneError.className = 'error-message invalid';
+                        submitButton.disabled = true;
+                        phoneValidated = false;
+                    }
+                } catch (error) {
+                    console.error('[Main] Erro na validação:', error);
+                    phoneError.textContent = '⚠ Erro na validação. Tente novamente.';
+                    phoneError.style.color = '#f39c12';
+                    phoneError.className = 'error-message error';
+                    submitButton.disabled = true;
+                    phoneValidated = false;
+                }
+            }, 800);
             
-            if (isValid) {
-                phoneError.textContent = '';
-                submitButton.disabled = false;
-                phoneValidated = true;
-            } else {
-                phoneError.textContent = 'WhatsApp inválido';
-                phoneError.style.color = '#e74c3c';
-                submitButton.disabled = true;
-                phoneValidated = false;
-            }
+        } else if (cleanPhone.length > 0) {
+            phoneError.textContent = 'Digite um número válido (10 ou 11 dígitos)';
+            phoneError.style.color = '#95a5a6';
+            phoneError.className = 'error-message info';
         } else {
             phoneError.textContent = '';
-            submitButton.disabled = true;
-            phoneValidated = false;
+            phoneError.className = 'error-message';
         }
     });
     
@@ -156,9 +201,10 @@ document.addEventListener('DOMContentLoaded', function() {
             email: document.getElementById('email').value
         };
 
-        // Disparar evento do Facebook Conversions API
-        if (typeof trackPreencheuFormulario === 'function') {
-            trackPreencheuFormulario(formData);
+        // Disparar evento Lead para Facebook Conversions API
+        if (window.fbEvents && typeof window.fbEvents.trackLead === 'function') {
+            console.log('[Main] Enviando evento Lead para Facebook CAPI');
+            await window.fbEvents.trackLead(formData);
         }
         
         submitButton.disabled = true;
