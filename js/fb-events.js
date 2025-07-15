@@ -173,6 +173,20 @@ async function sendToConversionsAPI(eventName, eventData, eventId) {
     return { success: false, error: 'Configuração ausente' };
   }
   
+  // Sanitizar e validar a URL base
+  let baseUrl = window.ENV.API_BASE_URL.trim();
+  
+  // Remover barra final se existir
+  if (baseUrl.endsWith('/')) {
+    baseUrl = baseUrl.slice(0, -1);
+  }
+  
+  // Validar se é uma URL válida
+  if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
+    FBDebug.error('API_BASE_URL inválida - deve começar com http:// ou https://', baseUrl);
+    return { success: false, error: 'URL inválida' };
+  }
+  
   const urlParameters = getUrlParameters();
   
   // Determinar endpoint baseado no tipo de evento
@@ -213,9 +227,11 @@ async function sendToConversionsAPI(eventName, eventData, eventId) {
   });
   
   try {
-    FBDebug.info(`Enviando para CAPI: ${eventName}`, payload);
+    // Construir URL corretamente usando a baseUrl sanitizada
+    const fullUrl = `${baseUrl}${endpoint}`;
+    FBDebug.info(`Enviando para CAPI: ${eventName}`, { url: fullUrl, payload });
     
-    const response = await fetch(`${window.ENV.API_BASE_URL}${endpoint}`, {
+    const response = await fetch(fullUrl, {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
@@ -455,6 +471,14 @@ function validateFacebookConfig() {
   
   if (!window.ENV?.API_BASE_URL) {
     issues.push('API_BASE_URL não configurada');
+  } else {
+    // Debug detalhado da URL
+    FBDebug.info('API_BASE_URL configurada', {
+      raw: window.ENV.API_BASE_URL,
+      length: window.ENV.API_BASE_URL.length,
+      startsWithHttp: window.ENV.API_BASE_URL.startsWith('http'),
+      domain: window.location.hostname
+    });
   }
   
   if (issues.length > 0) {
@@ -479,6 +503,11 @@ document.addEventListener('DOMContentLoaded', function() {
   // Validar configuração
   validateFacebookConfig();
   
+  // Debug das URLs (apenas em modo debug)
+  if (FACEBOOK_CONFIG.debugMode) {
+    debugApiUrls();
+  }
+  
   // Configurar observer para ViewContent
   setupViewContentObserver();
   
@@ -498,6 +527,24 @@ window.addEventListener('load', function() {
   }, 1000);
 });
 
+// Função de debug para testar URLs
+function debugApiUrls() {
+  const eventTypes = ['pageview', 'viewcontent', 'lead'];
+  const baseUrl = window.ENV?.API_BASE_URL || 'NOT_CONFIGURED';
+  
+  console.group('🔍 Debug API URLs');
+  console.log('Base URL:', baseUrl);
+  console.log('Current Domain:', window.location.hostname);
+  
+  eventTypes.forEach(eventType => {
+    const endpoint = `/api/track/${eventType}`;
+    const fullUrl = `${baseUrl}${endpoint}`;
+    console.log(`${eventType.toUpperCase()}:`, fullUrl);
+  });
+  
+  console.groupEnd();
+}
+
 // Exposer funções globais para uso externo
 window.fbEvents = {
   trackPageView,
@@ -507,7 +554,8 @@ window.fbEvents = {
   updateUserData,
   getUserData: () => ({ ...globalUserData }),
   clearCache: () => EventCache.sentEvents.clear(),
-  debug: FBDebug
+  debug: FBDebug,
+  debugUrls: debugApiUrls
 };
 
 FBDebug.info('✅ Facebook Events carregado com deduplicação ativa'); 

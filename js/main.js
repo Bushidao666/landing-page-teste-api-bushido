@@ -83,10 +83,10 @@ async function sendToAirtable(formData) {
     };
     
     try {
-        const response = await fetch(`https://api.airtable.com/v0/${ENV.AIRTABLE_BASE_ID}/${ENV.AIRTABLE_TABLE_ID}`, {
+        const response = await fetch(`https://api.airtable.com/v0/${window.ENV.AIRTABLE_BASE_ID}/${window.ENV.AIRTABLE_TABLE_ID}`, {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${ENV.AIRTABLE_API_KEY}`,
+                'Authorization': `Bearer ${window.ENV.AIRTABLE_API_KEY}`,
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify(airtableData)
