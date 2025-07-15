@@ -13,6 +13,103 @@
 // ===================================================================
 
 /**
+ * FACEBOOK CONVERSIONS API & PIXEL INTEGRATION WITH DEDUPLICATION
+ */
+
+/**
+ * FUNÇÃO DE DEBUG PARA TESTE DE URLs
+ */
+function debugUrlConstruction() {
+  console.group('🔍 DEBUG: Construção de URL');
+  
+  console.log('1. window.ENV:', window.ENV);
+  console.log('2. API_BASE_URL:', window.ENV?.API_BASE_URL);
+  
+  if (window.ENV?.API_BASE_URL) {
+    const baseUrl = window.ENV.API_BASE_URL.trim();
+    const endpoint = '/api/track/viewcontent';
+    
+    console.log('3. Base URL limpa:', baseUrl);
+    console.log('4. Endpoint:', endpoint);
+    
+    // Teste 1: Concatenação simples
+    const url1 = `${baseUrl}${endpoint}`;
+    console.log('5. URL Concatenação simples:', url1);
+    
+    // Teste 2: new URL()
+    try {
+      const url2 = new URL(endpoint, baseUrl).toString();
+      console.log('6. URL new URL():', url2);
+    } catch (error) {
+      console.error('6. Erro new URL():', error);
+    }
+    
+    // Teste 3: Validação da URL base
+    try {
+      const urlObj = new URL(baseUrl);
+      console.log('7. URL base válida:', {
+        hostname: urlObj.hostname,
+        protocol: urlObj.protocol,
+        href: urlObj.href
+      });
+    } catch (error) {
+      console.error('7. URL base inválida:', error);
+    }
+    
+    // Teste 4: window.location para comparação
+    console.log('8. window.location.href:', window.location.href);
+    console.log('9. window.location.hostname:', window.location.hostname);
+  }
+  
+  console.groupEnd();
+}
+
+// Executar debug automaticamente quando carregado
+if (window.ENV?.debugMode !== false) {
+  setTimeout(debugUrlConstruction, 1000);
+}
+
+/**
+ * FUNÇÃO DE TESTE MANUAL PARA DEBUG
+ */
+window.testApiUrl = async function() {
+  console.log('🧪 TESTE MANUAL DA API URL');
+  
+  if (!window.ENV?.API_BASE_URL) {
+    console.error('❌ window.ENV.API_BASE_URL não configurada');
+    return;
+  }
+  
+  const baseUrl = window.ENV.API_BASE_URL.trim();
+  const endpoint = '/api/track/pageview';
+  
+  try {
+    // Método usado no código
+    const fullUrl = new URL(endpoint, baseUrl).toString();
+    console.log('🔗 URL construída:', fullUrl);
+    
+    // Teste real de fetch (só headers)
+    console.log('📡 Testando fetch...');
+    const response = await fetch(fullUrl, {
+      method: 'HEAD', // Só headers para não enviar dados
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    console.log('📊 Resposta:', {
+      status: response.status,
+      statusText: response.statusText,
+      url: response.url,
+      headers: Object.fromEntries(response.headers.entries())
+    });
+    
+  } catch (error) {
+    console.error('❌ Erro no teste:', error);
+  }
+};
+
+/**
  * CONFIGURAÇÃO PRINCIPAL
  */
 const FACEBOOK_CONFIG = {
@@ -173,18 +270,30 @@ async function sendToConversionsAPI(eventName, eventData, eventId) {
     return { success: false, error: 'Configuração ausente' };
   }
   
-  // Sanitizar e validar a URL base
+  // Sanitizar e validar a URL base com validação extra
   let baseUrl = window.ENV.API_BASE_URL.trim();
+  
+  // Debug da URL original
+  FBDebug.info(`🔍 URL original do ENV: "${baseUrl}"`);
+  
+  // Validar se é uma URL absoluta válida
+  if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
+    FBDebug.error('❌ API_BASE_URL inválida - deve ser URL absoluta com protocolo', baseUrl);
+    return { success: false, error: 'URL deve ser absoluta (iniciar com https://)' };
+  }
   
   // Remover barra final se existir
   if (baseUrl.endsWith('/')) {
     baseUrl = baseUrl.slice(0, -1);
   }
   
-  // Validar se é uma URL válida
-  if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
-    FBDebug.error('API_BASE_URL inválida - deve começar com http:// ou https://', baseUrl);
-    return { success: false, error: 'URL inválida' };
+  // Validação adicional: verificar se não é uma URL relativa acidental
+  try {
+    const urlObj = new URL(baseUrl);
+    FBDebug.info(`✅ URL validada - Host: ${urlObj.hostname}, Protocol: ${urlObj.protocol}`);
+  } catch (error) {
+    FBDebug.error('❌ URL malformada:', error.message);
+    return { success: false, error: 'URL malformada' };
   }
   
   const urlParameters = getUrlParameters();
@@ -227,9 +336,25 @@ async function sendToConversionsAPI(eventName, eventData, eventId) {
   });
   
   try {
-    // Construir URL corretamente usando a baseUrl sanitizada
-    const fullUrl = `${baseUrl}${endpoint}`;
-    FBDebug.info(`Enviando para CAPI: ${eventName}`, { url: fullUrl, payload });
+    // CONSTRUIR URL ABSOLUTA CORRETAMENTE
+    // Usar new URL() para garantir que seja tratada como absoluta
+    const fullUrl = new URL(endpoint, baseUrl).toString();
+    
+    // Debug detalhado da construção da URL
+    FBDebug.info(`🔧 Construção da URL:`, {
+      baseUrl: baseUrl,
+      endpoint: endpoint,
+      fullUrl: fullUrl,
+      method: 'new URL(endpoint, baseUrl)'
+    });
+    
+    // Verificação final: garantir que a URL não contém domínio da Netlify
+    if (fullUrl.includes('netlify.app')) {
+      FBDebug.error('❌ URL contém domínio Netlify - algo está errado!', fullUrl);
+      return { success: false, error: 'URL construída incorretamente' };
+    }
+    
+    FBDebug.info(`📡 Enviando para CAPI: ${eventName}`, { url: fullUrl, payload });
     
     const response = await fetch(fullUrl, {
       method: 'POST',
